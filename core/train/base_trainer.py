@@ -200,6 +200,10 @@ class BaseTrainer:
 
             if epoch % self.empty_gpu_every and self.device == 'mpu':
                 torch.mps.empty_cache()
+            elif epoch % self.empty_gpu_every and self.device == 'gpu':
+                torch.cuda.empty_cache()
+            else:
+                pass
 
             if self.monitor_cpu_resources_every:
                 if epoch % self.monitor_cpu_resources_every:

@@ -140,13 +140,13 @@ class Autoencoder(BaseModel):
 
         self.middle_block = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(middle_input_size, self.latent_dim),
+            nn.Linear(middle_input_size, 2*self.latent_dim),
             self.activation_function,
-            # nn.Linear(self.latent_dim * 2, self.latent_dim),
-            # self.activation_function,
-            # nn.Linear(self.latent_dim, self.latent_dim * 2, ),
-            # self.activation_function,
-            nn.Linear(self.latent_dim, middle_input_size),
+            nn.Linear(2*self.latent_dim, self.latent_dim),
+            self.activation_function,
+            nn.Linear(self.latent_dim, self.latent_dim * 2),
+            self.activation_function,
+            nn.Linear(self.latent_dim * 2, middle_input_size),
             self.activation_function
         )
 

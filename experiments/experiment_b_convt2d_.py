@@ -7,6 +7,8 @@ from core.loss.loss_functions import MSELoss, L1Loss, CombinedLoss
 import torchvision.transforms as transforms
 
 from core.models.autoencoder import Autoencoder
+from core.models.autoencoder_pooling import AutoencoderPooling
+from core.models.verbose_model import VerboseExecution, PrintLayer
 from core.train.base_trainer import BaseTrainer
 
 
@@ -19,7 +21,6 @@ def run_experiment_1(params: dict):
     transforms_ = transforms.Compose([
         transforms.ToTensor(),
         transforms.Pad((1, 81, 0, 81)),
-        # transforms.Grayscale(),
         transforms.Normalize(0.5, 0.5),
         transforms.RandomHorizontalFlip(0.5),
         transforms.Resize((244, 244))
@@ -33,7 +34,11 @@ def run_experiment_1(params: dict):
                                       validation_split=0.5,
                                       num_workers=4)
 
-    dummy_model = Autoencoder(**model_kwargs)
+    dummy_model = AutoencoderPooling(**model_kwargs)
+    verbose_model = VerboseExecution(dummy_model)
+    dummy_input = torch.randn((1, 3, model_kwargs['input_dim'], model_kwargs['input_dim']))
+    _ = verbose_model(dummy_input)
+    print(dummy_model)
 
     loss_function_1 = MSELoss()
     loss_function_2 = L1Loss()
@@ -65,8 +70,7 @@ if __name__ == '__main__':
     model_kwargs = dict(input_channels=3,
                         input_dim=244,
                         layer_config=[
-                            (16, 3, 1, 1), (16, 3, 1, 1), (32, 3, 2, 1), (32, 3, 1, 1), (64, 3, 2, 1), (64, 3, 1, 1),
-                            (64, 3, 1, 1),
+                            (16, 3, 1, 1, 2), (16, 3, 1, 1, 2), (32, 3, 2, 1, None)#, (32, 3, 1, 1, 2),
                         ],
                         latent_dim=2000,
                         activation_func='ReLU',

@@ -47,7 +47,7 @@ def nearest_square(num) -> Tuple:
         return side, side
 
 
-def calculate_conv_output_size(input_size, kernel_size, padding, stride) -> int:
+def calculate_conv_output_size(input_size, kernel_size, padding, stride, pooling_kernel=None) -> int:
     """
     Calculate the size of the convolutional layer output.
 
@@ -61,10 +61,14 @@ def calculate_conv_output_size(input_size, kernel_size, padding, stride) -> int:
     - int: Size of the convolutional layer output.
     """
     output_size = ((input_size - kernel_size + 2 * padding) // stride) + 1
+    if pooling_kernel:
+        output_size /= 2
+
     return output_size
 
 
-def calculate_output_padding(output_size, input_size, stride, kernel_size, padding) -> int:
+def calculate_output_padding(output_size, input_size, stride, kernel_size, padding,
+                             pooling_kernel: int = None, pooling_stride: int = None) -> int:
     """
     Calculate the output_padding parameter for a transposed convolution.
 
@@ -78,6 +82,12 @@ def calculate_output_padding(output_size, input_size, stride, kernel_size, paddi
     Returns:
     - int: Output_padding parameter for the transposed convolution.
     """
-    output_padding = output_size - (1 + kernel_size - 1 + (input_size - 1)*stride - 2*padding)
+    if pooling_kernel is None and pooling_stride is None:
+        output_padding = output_size - (1 + kernel_size - 1 + (input_size - 1)*stride - 2*padding)
+    else:
+        pooled_input_size = ((input_size - pooling_kernel) // pooling_stride) + 1
+
+        # Calculate the output_padding considering both convolution and pooling
+        output_padding = output_size - ((pooled_input_size - 1) * stride + kernel_size - 2 * padding)
 
     return output_padding

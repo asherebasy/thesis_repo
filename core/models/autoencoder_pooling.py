@@ -4,17 +4,18 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from core.models.verbose_model import VerboseExecution, PrintLayer
+from core.models.base_model import BaseModel
+from core.models.verbose_model import VerboseExecution
 from utils.utils import calculate_conv_output_size, calculate_output_padding
 
 
-class AutoencoderPooling(nn.Module):
+class AutoencoderPooling(BaseModel):
     """
     :param latent_dim:
     :param layer_config: layer configuration of the autoencoder, specifically the encoder part.
                          The length resembles the total number of layers in the encoder, which is mirrored
-                         in the decoder. Each element is a tuple of (out_channel, kernel_size, stride, padding)
-                         For example: [(32, 3, 1, 2), (16, 3, 2, 2), (8, 3, 1, 1)].
+                         in the decoder. Each element is a tuple of (out_channel, kernel_size, stride, padding, pooling_kernel)
+                         For example: [(32, 3, 1, 2, 2), (16, 3, 2, 2, 2), (8, 3, 1, 1, 2)].
 
     """
 
@@ -22,10 +23,10 @@ class AutoencoderPooling(nn.Module):
                  layer_config: list,
                  latent_dim: int,
                  input_dim: int,
+                 batch_norm: bool = False,
                  input_channels: int = 3,
                  activation_func: str = None,
-                 state_dict_path: str = None,
-                 upsampling_mode: str = 'nearest'
+                 state_dict_path: str = None
                  ) -> None:
         super().__init__()
         self.encoder, self.decoder, self.middle_block = None, None, None
@@ -33,10 +34,11 @@ class AutoencoderPooling(nn.Module):
         self.middle_block_to_decoder_size = None
         self.latent_dim = latent_dim
         self.input_dim = input_dim
+        self.batch_norm = batch_norm
         self.layer_config = layer_config
         self.input_channels = input_channels
-        self.act_func = self._build_activation_function(activation_func)
-        self.upsampling_mode = upsampling_mode
+        self.activation_function = self._build_activation_function(activation_func)
+        self.activation_function = nn.ReLU()
 
         # build encoder and decoder
         _ = self._build_encoder()
@@ -52,23 +54,13 @@ class AutoencoderPooling(nn.Module):
             self.epoch = epoch
 
     @staticmethod
-    def _build_activation_function(func: str) -> nn.Module:
-        if hasattr(nn, func):
-            function = getattr(nn, func)
-
-            if isinstance(function, type) and issubclass(function, nn.Module):
-                return function(inplace=True)
-            else:
-                raise ValueError(f"{function} is not a valid PyTorch class")
-        else:
-            raise ValueError(f"{func} is not part of nn.Module")
-
-    def load_model_from_state_dict(self,
-                                   path: str,
-                                   strict: bool = True
-                                   ) -> None:
-        model_state_dict = torch.load(path)['model_state_dict']
-        self.load_state_dict(model_state_dict, strict=strict)
+    def init_weights(module):
+        if isinstance(module, nn.Conv2d):
+            torch.nn.init.xavier_uniform_(module.weight)
+            module.bias.data.fill_(0.01)
+        elif isinstance(module, nn.Linear):
+            torch.nn.init.xavier_uniform_(module.weight)
+            module.bias.data.fill_(0.01)
 
     def _build_encoder(self) -> int:
         self.encoder = nn.ModuleList()
@@ -80,13 +72,14 @@ class AutoencoderPooling(nn.Module):
             # check the validity of current tuple entry
             if not isinstance(layer, Tuple):
                 raise ValueError(f"Expected a tuple, but got {type(layer)}")
-            if len(layer) != 4:
+            if len(layer) != 5:
                 raise RuntimeError(f"Expected a tuple of 4 entries, but got {len(layer)}")
 
             output_size = calculate_conv_output_size(input_size=self.encoder_layer_sizes[-1],
                                                      kernel_size=layer[1],
                                                      padding=layer[3],
-                                                     stride=layer[2])
+                                                     stride=layer[2],
+                                                     pooling_kernel=layer[4] if layer[4] is not None else None)
             self.encoder_layer_sizes.append(output_size)
             self.encoder.extend(
                 nn.Sequential(
@@ -97,7 +90,9 @@ class AutoencoderPooling(nn.Module):
                         stride=layer[2],
                         padding=layer[3]
                     ),
-                    self.act_func
+                    # nn.BatchNorm2d(layer[0]) if self.batch_norm else nn.Identity(),
+                    self.activation_function,
+                    nn.AvgPool2d(layer[4]) if layer[4] is not None else nn.Identity()
                 )
             )
             input_channels = layer[0]
@@ -113,37 +108,38 @@ class AutoencoderPooling(nn.Module):
             # check the validity of current tuple entry
             if not isinstance(layer, Tuple):
                 raise ValueError(f"Expected a tuple, but got {type(layer)}")
-            if len(layer) != 4:
+            if len(layer) != 5:
                 raise RuntimeError(f"Expected a tuple of 4 entries, but got {len(layer)}")
 
-            input_channels = layer[0]
-            try:
-                output_channels = self.layer_config[-ix-2][0]
-            except IndexError:
-                output_channels = self.input_channels
-
-            output_padding = calculate_output_padding(input_size=self.encoder_layer_sizes[-ix - 1],
+            factor = 1 if layer[4] is None else layer[4]
+            output_padding = calculate_output_padding(input_size=self.encoder_layer_sizes[-ix - 1]*factor,
                                                       output_size=self.encoder_layer_sizes[-ix - 2],
                                                       stride=layer[2],
                                                       kernel_size=layer[1],
-                                                      padding=layer[3])
+                                                      padding=layer[3],
+                                                      pooling_kernel=None,
+                                                      pooling_stride=None)
+            input_channels = layer[0]
+            try:
+                output_channels = self.layer_config[-ix - 2][0]
+            except IndexError:
+                output_channels = self.input_channels
             self.decoder.extend(
                 nn.Sequential(
-                    nn.Upsample(
-                        size=self.encoder_layer_sizes[-ix-2],
-                        mode=self.upsampling_mode,
-                        align_corners=True if self.upsampling_mode != 'nearest' else None
-                    ),
-                    nn.Conv2d(
+                    nn.UpsamplingNearest2d(scale_factor=layer[4]) if layer[4] is not None else nn.Identity(),
+                    nn.ConvTranspose2d(
                         in_channels=input_channels,
                         out_channels=output_channels,
                         kernel_size=layer[1],
-                        stride=1,
+                        stride=layer[2],
                         padding=layer[3],
+                        output_padding=int(output_padding)
                     ),
-                    self.act_func
+                    # nn.BatchNorm2d(output_channels) if self.batch_norm else nn.Identity(),
+                    self.activation_function if ix != len(self.layer_config) - 1 else nn.Identity(),
                 )
             )
+            # self.decoder.extend(nn.Sequential(nn.Tanh()))
 
     def _build_middle_block(self) -> None:
         with torch.no_grad():
@@ -152,9 +148,13 @@ class AutoencoderPooling(nn.Module):
         self.middle_block = nn.Sequential(
             nn.Flatten(),
             nn.Linear(middle_input_size, self.latent_dim),
-            self.act_func,
+            self.activation_function,
+            # nn.Linear(2*self.latent_dim, self.latent_dim),
+            # self.activation_function,
+            # nn.Linear(self.latent_dim, self.latent_dim * 2),
+            # self.activation_function,
             nn.Linear(self.latent_dim, middle_input_size),
-            self.act_func
+            self.activation_function
         )
 
     def _calculate_features(self) -> int:
@@ -179,29 +179,24 @@ class AutoencoderPooling(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.encode(x)
         x = self.middle_block(x)
-        x = x.view((x.size(0),) + self.middle_block_to_decoder_size)
+        x_ = x.view((x.size(0),) + self.middle_block_to_decoder_size)
+        x = x.view(-1,  self.middle_block_to_decoder_size[0], self.middle_block_to_decoder_size[1],
+                   self.middle_block_to_decoder_size[2])
         x = self.decode(x)
 
         return x
 
-    def reconstruct(self, test_data: torch.Tensor) -> torch.Tensor:
-        with torch.no_grad():
-            reconstructed_data = self.forward(test_data)
-
-        return reconstructed_data
-
 
 if __name__ == '__main__':
-    model = AutoencoderUpsampling(
+    model = Autoencoder(
         input_channels=3,
         input_dim=428,
         layer_config=[(16, 3, 2, 1), (32, 3, 2, 1), (64, 3, 2, 1), (64, 3, 2, 1)],
         latent_dim=128,
-        activation_func='LeakyReLU',
-        upsampling_mode='bilinear'
-    )
+        activation_func='ReLU')
+    print(model.encoder)
+    print(model.middle_block)
+    print(model.decoder)
     dummy_input = torch.randn((1, 3, 428, 428))
     verbose_model = VerboseExecution(model)
     _ = verbose_model(dummy_input)
-
-    reconstructions = model.reconstruct(dummy_input)

@@ -12,11 +12,20 @@ class VerboseExecution(nn.Module):
         self.model = model
 
         # Register a hook for each layer
-        for name, layer in self.model.named_children():
-            layer.__name__ = name
-            layer.register_forward_hook(
-                lambda layer_, _, output: print(f"{layer_.__name__}: {output.shape}")
-            )
+        for idx, layer in enumerate(self.model.modules()):
+            if isinstance(layer, nn.Sequential):
+                # If the layer is Sequential, we iterate over its children
+                for i, sub_layer in enumerate(layer.children()):
+                    sub_layer.__name__ = f"{type(sub_layer).__name__}_{idx}_{i}"
+                    sub_layer.register_forward_hook(
+                        lambda module, input, output, name=sub_layer.__name__: print(f"{name}: {output.shape}")
+                    )
+            else:
+                # For other types of layers
+                layer.__name__ = f"{type(layer).__name__}_{idx}"
+                layer.register_forward_hook(
+                    lambda module, input, output, name=layer.__name__: print(f"{name}: {output.shape}")
+                )
 
     def forward(self, x: Tensor) -> Tensor:
         return self.model(x)

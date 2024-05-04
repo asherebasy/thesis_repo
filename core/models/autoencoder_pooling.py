@@ -90,10 +90,10 @@ class AutoencoderPooling(BaseModel):
                         stride=layer[2],
                         padding=layer[3]
                     ),
-                    # nn.BatchNorm2d(layer[0]) if self.batch_norm else nn.Identity(),
                     self.activation_function,
-                    nn.AvgPool2d(layer[4]) if layer[4] is not None else nn.Identity()
-                )
+                    nn.AvgPool2d(layer[4]) if layer[4] is not None else nn.Identity(),
+                    nn.BatchNorm2d(layer[0]) if self.batch_norm else nn.Identity(),
+            )
             )
             input_channels = layer[0]
 
@@ -135,8 +135,8 @@ class AutoencoderPooling(BaseModel):
                         padding=layer[3],
                         output_padding=int(output_padding)
                     ),
-                    # nn.BatchNorm2d(output_channels) if self.batch_norm else nn.Identity(),
                     self.activation_function if ix != len(self.layer_config) - 1 else nn.Identity(),
+                    nn.BatchNorm2d(output_channels) if self.batch_norm else nn.Identity(),
                 )
             )
             # self.decoder.extend(nn.Sequential(nn.Tanh()))

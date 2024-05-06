@@ -184,8 +184,8 @@ class BaseTrainer:
                                              title_str=name)
 
             if epoch % self.save_feature_maps == 0:
-                feature_map_layers = ['encoder.0', 'encoder.2', 'encoder.4', 'encoder.6', 'encoder.8', 'encoder.10',
-                                      'decoder.0', 'decoder.2', 'decoder.4', 'decoder.6', 'encoder.8', 'decoder.10']
+                feature_map_layers = [f'encoder.{i}' for i in range(0, 10)]
+                feature_map_layers += [f'decoder.{i}' for i in range(0, 10)]
                 layer_feature_maps_save_path = os.path.join(self.feature_maps_dir, f'epoch_{epoch}')
                 os.makedirs(layer_feature_maps_save_path, exist_ok=True)
                 plot_feature_maps(to_save=feature_map_layers,
